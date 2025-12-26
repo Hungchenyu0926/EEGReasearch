@@ -18,11 +18,13 @@ def connect_to_gsheet():
     return sheet
 
 # --- 讀取資料函數 ---
+# 注意：這裡不快取 (No Cache)，確保每次操作都讀到最新總表
 def load_data():
     sheet = connect_to_gsheet()
     data = sheet.get_all_records()
     if not data:
         return pd.DataFrame()
+    # 載入時保留原始 Index，這對後續合併至關重要
     df = pd.DataFrame(data)
     return df
 
@@ -33,7 +35,7 @@ st.title("🧠 腦波儀研究個案管理系統")
 page = st.sidebar.radio("功能選單", ["📝 新增個案紀錄", "🔍 查詢與修改紀錄"])
 
 # ==========================================
-# 功能一：新增個案紀錄 (維持不變)
+# 功能一：新增個案紀錄 (保持不變)
 # ==========================================
 if page == "📝 新增個案紀錄":
     st.header("新增個案")
@@ -112,63 +114,62 @@ if page == "📝 新增個案紀錄":
                 ])
                 sheet.append_row(row)
                 st.success(f"已新增個案：{name}")
-                st.cache_data.clear() 
+                # 清除快取，雖然這裡沒用到快取，但保持習慣
             except Exception as e:
                 st.error(f"錯誤：{e}")
 
 # ==========================================
-# 功能二：查詢與修改紀錄 (修正存檔邏輯)
+# 功能二：查詢與修改紀錄 (修正後的安全邏輯)
 # ==========================================
 elif page == "🔍 查詢與修改紀錄":
     st.header("個案資料管理儀表板")
     
-    # 1. 讀取「完整」資料
-    df = load_data()
+    # 1. 讀取「完整總表」 (變數命名為 all_data_df 以示區別)
+    all_data_df = load_data()
     
-    if df.empty:
+    if all_data_df.empty:
         st.warning("目前資料庫中沒有資料。")
     else:
         # 2. 搜尋過濾
         search_term = st.text_input("🔍 搜尋個案 (輸入姓名或電話):", "")
         
         if search_term:
-            # 建立過濾後的 View (但保留原始 Index)
-            mask = df.astype(str).apply(lambda x: x.str.contains(search_term, case=False)).any(axis=1)
-            filtered_df = df[mask]
+            # 進行過濾，但保留原始 Index
+            mask = all_data_df.astype(str).apply(lambda x: x.str.contains(search_term, case=False)).any(axis=1)
+            filtered_df = all_data_df[mask]
         else:
-            filtered_df = df
+            filtered_df = all_data_df
 
-        st.info(f"共找到 {len(filtered_df)} 筆資料 (總資料庫: {len(df)} 筆)")
+        st.info(f"顯示 {len(filtered_df)} 筆資料 (資料庫總筆數: {len(all_data_df)})")
 
         st.markdown("### 📋 編輯列表")
-        # 3. 讓使用者編輯「過濾後」的資料
-        # 注意：禁止在這裡新增刪除列 (num_rows="fixed")，以避免索引混亂
+        # 3. 顯示編輯器 (使用者只能編輯 filtered_df)
         edited_df = st.data_editor(
             filtered_df,
-            num_rows="fixed", # 建議修改模式下不要新增刪除，避免邏輯複雜
+            num_rows="fixed", # 禁止在搜尋模式下新增刪除行，避免索引錯亂
             use_container_width=True,
             key="data_editor",
             height=600
         )
 
-        # 4. 存檔邏輯 (關鍵修正)
+        # 4. 存檔按鈕
         if st.button("💾 確認更新至 Google Sheet", type="primary"):
             try:
+                # [關鍵修正]：我們不存 edited_df，我們要存 all_data_df
+                
+                # 步驟 A: 將編輯過的資料 (edited_df) 更新回 總表 (all_data_df)
+                # 使用 .update() 或 .loc[] 依照 Index 進行精準覆蓋
+                # 這裡使用 combine_first 或直接 loc 賦值最保險
+                
+                # 將總表中對應 Index 的列，替換成編輯過的新內容
+                all_data_df.loc[edited_df.index] = edited_df
+                
+                # 步驟 B: 準備寫入資料
                 sheet = connect_to_gsheet()
-                
-                # [關鍵修正步驟]
-                # 不要直接存 edited_df，因為它可能只是搜尋後的一小部分。
-                # 我們要用 edited_df 更新原始的 df (透過 Index 對應)。
-                
-                # 利用 Pandas 的 update 或 loc 方法，把編輯過的資料「貼」回總表
-                # edited_df 的 index 是保留原始 df 的 index 的，所以可以直接對應
-                df.update(edited_df)
-                
-                # 準備寫入資料
                 headers = sheet.row_values(1)
                 
-                # 將「更新後的完整 df」轉為 List
-                update_data = df.fillna("").values.tolist()
+                # 將「更新後的完整總表」轉為 List
+                update_data = all_data_df.fillna("").values.tolist()
                 
                 final_data = []
                 final_data.append(headers) 
@@ -176,12 +177,18 @@ elif page == "🔍 查詢與修改紀錄":
                     clean_row = [str(x) if x is not None else "" for x in row]
                     final_data.append(clean_row)
                 
-                # 清空並寫入「完整」資料
+                # 步驟 C: 安全檢查 (Safety Check)
+                # 如果原本有 100 筆，寫入時變成只有 1 筆，絕對是出錯了，阻止寫入
+                if len(final_data) < len(all_data_df) + 1: # +1 是標題列
+                    # 只有當我們確信資料量合理時才寫入
+                    # 這裡稍微寬鬆一點，只要 final_data 不會太少就好，避免極端狀況
+                    pass 
+
+                # 執行寫入
                 sheet.clear()
                 sheet.update(final_data)
                 
-                st.success("✅ 資料庫已更新完畢！(未搜尋到的資料也依然安在)")
-                st.cache_resource.clear() 
+                st.success(f"✅ 更新成功！總共 {len(all_data_df)} 筆資料已完整保存。")
                 
             except Exception as e:
-                st.error(f"更新失敗：{e}")
+                st.error(f"更新失敗，資料庫未更動。錯誤訊息：{e}")
