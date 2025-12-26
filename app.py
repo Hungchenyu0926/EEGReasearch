@@ -6,6 +6,13 @@ import pandas as pd
 
 # --- 設定頁面資訊 ---
 st.set_page_config(page_title="腦波儀研究個案管理系統", layout="wide")
+st.set_page_config(page_title="腦波儀研究個案管理系統", layout="wide")
+
+# 加入這個按鈕來手動清除快取
+if st.sidebar.button("🔄 強制清除快取 (修復介面用)"):
+    st.cache_resource.clear()
+    st.cache_data.clear()
+    st.rerun()
 
 # --- 連接 Google Sheets 的函數 ---
 @st.cache_resource
@@ -214,5 +221,6 @@ elif page == "🔍 查詢與修改紀錄":
             except Exception as e:
                 st.error(f"更新失敗：{e}")
    
+
 
 
