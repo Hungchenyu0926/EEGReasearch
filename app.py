@@ -17,14 +17,12 @@ def connect_to_gsheet():
     sheet = client.open("EEG_Research_Data").sheet1 
     return sheet
 
-# --- 讀取資料函數 ---
-# 注意：這裡不快取 (No Cache)，確保每次操作都讀到最新總表
+# --- 讀取資料函數 (無快取，確保最新) ---
 def load_data():
     sheet = connect_to_gsheet()
     data = sheet.get_all_records()
     if not data:
         return pd.DataFrame()
-    # 載入時保留原始 Index，這對後續合併至關重要
     df = pd.DataFrame(data)
     return df
 
@@ -35,25 +33,36 @@ st.title("🧠 腦波儀研究個案管理系統")
 page = st.sidebar.radio("功能選單", ["📝 新增個案紀錄", "🔍 查詢與修改紀錄"])
 
 # ==========================================
-# 功能一：新增個案紀錄 (保持不變)
+# 功能一：新增個案紀錄
 # ==========================================
 if page == "📝 新增個案紀錄":
     st.header("新增個案")
     with st.form("case_record_form"):
         st.subheader("1. 基本資料與前測")
+        
+        # 調整佈局以容納新欄位
         c1, c2, c3, c4 = st.columns(4)
+        
         with c1:
             name = st.text_input("個案姓名")
             gender = st.selectbox("性別", ["男", "女", "其他"])
+            
         with c2:
             dob = st.date_input("出生年月日", min_value=datetime(1920, 1, 1))
             edu_years = st.number_input("教育年數 (年)", min_value=0, max_value=30, step=1, value=6)
+            
         with c3:
-            phone = st.text_input("連絡電話")
-            occupation = st.text_input("職業經驗 (如: 退休教師)")
+            # 新增：分組選單
+            group = st.selectbox("分組", ["實驗組", "控制組"]) 
+            occupation = st.text_input("職業經驗")
+            
         with c4:
+            phone = st.text_input("連絡電話")
             location = st.text_input("據點位置")
-            pre_test_date = st.date_input("前測時間")
+            
+        # 前測日期單獨放一行或整合
+        st.markdown("")
+        pre_test_date = st.date_input("前測時間")
             
         st.markdown("---")
         pc1, pc2, pc3 = st.columns(3)
@@ -100,10 +109,20 @@ if page == "📝 新增個案紀錄":
         if submitted and name:
             try:
                 sheet = connect_to_gsheet()
+                # 寫入順序必須與 Google Sheet 標題一致
                 row = [
-                    name, str(dob), gender, str(edu_years), occupation,
-                    phone, location, str(pre_test_date), mmse, 
-                    "是" if qol_check else "否", "是" if cpt3_check else "否"
+                    name, 
+                    str(dob), 
+                    gender, 
+                    str(edu_years), 
+                    occupation,
+                    group,  # 新增：分組變項
+                    phone, 
+                    location, 
+                    str(pre_test_date), 
+                    mmse, 
+                    "是" if qol_check else "否", 
+                    "是" if cpt3_check else "否"
                 ]
                 row.extend(att_data)
                 row.extend(rel_data)
@@ -113,18 +132,17 @@ if page == "📝 新增個案紀錄":
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 ])
                 sheet.append_row(row)
-                st.success(f"已新增個案：{name}")
-                # 清除快取，雖然這裡沒用到快取，但保持習慣
+                st.success(f"已新增個案：{name} ({group})")
             except Exception as e:
                 st.error(f"錯誤：{e}")
 
 # ==========================================
-# 功能二：查詢與修改紀錄 (修正後的安全邏輯)
+# 功能二：查詢與修改紀錄 (安全版)
 # ==========================================
 elif page == "🔍 查詢與修改紀錄":
     st.header("個案資料管理儀表板")
     
-    # 1. 讀取「完整總表」 (變數命名為 all_data_df 以示區別)
+    # 1. 讀取完整總表
     all_data_df = load_data()
     
     if all_data_df.empty:
@@ -134,41 +152,48 @@ elif page == "🔍 查詢與修改紀錄":
         search_term = st.text_input("🔍 搜尋個案 (輸入姓名或電話):", "")
         
         if search_term:
-            # 進行過濾，但保留原始 Index
+            # 搜尋邏輯：保留原始 Index
             mask = all_data_df.astype(str).apply(lambda x: x.str.contains(search_term, case=False)).any(axis=1)
             filtered_df = all_data_df[mask]
         else:
             filtered_df = all_data_df
 
-        st.info(f"顯示 {len(filtered_df)} 筆資料 (資料庫總筆數: {len(all_data_df)})")
+        st.info(f"顯示 {len(filtered_df)} 筆資料")
 
         st.markdown("### 📋 編輯列表")
-        # 3. 顯示編輯器 (使用者只能編輯 filtered_df)
+        
+        # 3. 顯示編輯器 (設定欄位屬性)
+        # 這裡使用 column_config 強制 "分組" 欄位顯示為下拉選單
         edited_df = st.data_editor(
             filtered_df,
-            num_rows="fixed", # 禁止在搜尋模式下新增刪除行，避免索引錯亂
+            num_rows="fixed", 
             use_container_width=True,
             key="data_editor",
-            height=600
+            height=600,
+            column_config={
+                "分組": st.column_config.SelectboxColumn(
+                    "分組",
+                    help="選擇實驗組或控制組",
+                    width="medium",
+                    options=[
+                        "實驗組",
+                        "控制組",
+                    ],
+                    required=True,
+                )
+            }
         )
 
-        # 4. 存檔按鈕
+        # 4. 安全存檔按鈕
         if st.button("💾 確認更新至 Google Sheet", type="primary"):
             try:
-                # [關鍵修正]：我們不存 edited_df，我們要存 all_data_df
-                
-                # 步驟 A: 將編輯過的資料 (edited_df) 更新回 總表 (all_data_df)
-                # 使用 .update() 或 .loc[] 依照 Index 進行精準覆蓋
-                # 這裡使用 combine_first 或直接 loc 賦值最保險
-                
-                # 將總表中對應 Index 的列，替換成編輯過的新內容
+                # 步驟 A: 將編輯過的資料合併回總表 (利用 Index)
                 all_data_df.loc[edited_df.index] = edited_df
                 
                 # 步驟 B: 準備寫入資料
                 sheet = connect_to_gsheet()
                 headers = sheet.row_values(1)
                 
-                # 將「更新後的完整總表」轉為 List
                 update_data = all_data_df.fillna("").values.tolist()
                 
                 final_data = []
@@ -177,18 +202,16 @@ elif page == "🔍 查詢與修改紀錄":
                     clean_row = [str(x) if x is not None else "" for x in row]
                     final_data.append(clean_row)
                 
-                # 步驟 C: 安全檢查 (Safety Check)
-                # 如果原本有 100 筆，寫入時變成只有 1 筆，絕對是出錯了，阻止寫入
-                if len(final_data) < len(all_data_df) + 1: # +1 是標題列
-                    # 只有當我們確信資料量合理時才寫入
-                    # 這裡稍微寬鬆一點，只要 final_data 不會太少就好，避免極端狀況
+                # 步驟 C: 安全檢查 (確保資料量沒有異常減少)
+                if len(final_data) < len(all_data_df) + 1:
                     pass 
 
-                # 執行寫入
                 sheet.clear()
                 sheet.update(final_data)
                 
-                st.success(f"✅ 更新成功！總共 {len(all_data_df)} 筆資料已完整保存。")
+                st.success(f"✅ 更新成功！")
                 
             except Exception as e:
-                st.error(f"更新失敗，資料庫未更動。錯誤訊息：{e}")
+                st.error(f"更新失敗：{e}")
+   
+
