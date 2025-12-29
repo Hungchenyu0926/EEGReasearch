@@ -4,7 +4,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import pandas as pd
 
-# --- 1. 設定頁面資訊 ---
+# --- 1. 設定頁面資訊 (強制寬版模式) ---
 st.set_page_config(page_title="腦波儀研究個案管理系統", layout="wide")
 
 # --- 2. 連接 Google Sheets 的函數 ---
@@ -69,37 +69,47 @@ if page == "📝 新增個案紀錄":
         with pc3: cpt3_check = st.checkbox("前測-CPT3 測驗", key="new_pre_cpt3")
 
         st.markdown("---")
-        st.subheader("3. 訓練紀錄 (交錯進行)")
-        st.info("紀錄格式：[注意訓練] -> [放鬆訓練] (包含日期與時間/長度)")
+        # =========================================================
+        # [修正重點] 訓練紀錄區塊 - 強制 6 欄位排版
+        # =========================================================
+        st.subheader("3. 訓練紀錄 (含時間)")
+        st.info("填寫說明：請依序填寫 [是否完成] -> [日期] -> [時間長度]")
         
-        # [修改重點] 建立一個列表來暫存所有的訓練數據，順序至關重要
         training_data_list = []
 
         with st.expander("點擊展開 詳細訓練紀錄表", expanded=True):
-            for i in range(1, 9):
-                st.markdown(f"##### 第 {i} 次療程")
-                # 每一行包含：注意訓練(3欄位) + 放鬆訓練(3欄位)
-                # 版面配置：使用 6 個小欄位
-                col_a1, col_a2, col_a3, col_r1, col_r2, col_r3 = st.columns([1, 1.5, 1.5, 1, 1.5, 1.5])
-                
-                # --- 注意訓練區塊 ---
-                with col_a1:
-                    att_done = st.checkbox(f"注意{i}", key=f"att_done_{i}")
-                with col_a2:
-                    att_date = st.date_input(f"日期", key=f"att_date_{i}", label_visibility="collapsed")
-                with col_a3:
-                    att_time = st.text_input(f"時間", placeholder="時間/長度", key=f"att_time_{i}", label_visibility="collapsed")
-                
-                # --- 放鬆訓練區塊 ---
-                with col_r1:
-                    rel_done = st.checkbox(f"放鬆{i}", key=f"rel_done_{i}")
-                with col_r2:
-                    rel_date = st.date_input(f"日期", key=f"rel_date_{i}", label_visibility="collapsed")
-                with col_r3:
-                    rel_time = st.text_input(f"時間", placeholder="時間/長度", key=f"rel_time_{i}", label_visibility="collapsed")
+            # 標題列 (讓使用者知道欄位是什麼)
+            h1, h2, h3, h_space, h4, h5, h6 = st.columns([0.7, 1.2, 1.2, 0.2, 0.7, 1.2, 1.2])
+            h1.markdown("**🧘 注意-完成**")
+            h2.markdown("**日期**")
+            h3.markdown("**時間/長度**")
+            h4.markdown("**🌊 放鬆-完成**")
+            h5.markdown("**日期**")
+            h6.markdown("**時間/長度**")
 
-                # 將這一輪的數據依序加入列表 (注意 -> 放鬆)
-                # 順序：注意完成, 注意日期, 注意時間, 放鬆完成, 放鬆日期, 放鬆時間
+            for i in range(1, 9):
+                # 這裡將一行切成 7 份 (中間加一個 0.2 的空白間隔，區分左右)
+                # 比例：[勾選框, 日期, 時間] ---空白--- [勾選框, 日期, 時間]
+                cols = st.columns([0.7, 1.2, 1.2, 0.2, 0.7, 1.2, 1.2])
+                
+                # --- 左側：注意訓練 ---
+                with cols[0]:
+                    att_done = st.checkbox(f"注意{i}", key=f"att_done_{i}")
+                with cols[1]:
+                    att_date = st.date_input(f"d{i}", key=f"att_date_{i}", label_visibility="collapsed")
+                with cols[2]:
+                    # 這裡就是消失的欄位，現在強制給它空間
+                    att_time = st.text_input(f"t{i}", placeholder="例如:30min", key=f"att_time_{i}", label_visibility="collapsed")
+                
+                # --- 右側：放鬆訓練 ---
+                with cols[4]:
+                    rel_done = st.checkbox(f"放鬆{i}", key=f"rel_done_{i}")
+                with cols[5]:
+                    rel_date = st.date_input(f"rd{i}", key=f"rel_date_{i}", label_visibility="collapsed")
+                with cols[6]:
+                    rel_time = st.text_input(f"rt{i}", placeholder="例如:30min", key=f"rel_time_{i}", label_visibility="collapsed")
+
+                # 收集資料 (順序很重要：注意完成 -> 注意日期 -> 注意時間 -> 放鬆完成 -> 放鬆日期 -> 放鬆時間)
                 training_data_list.extend([
                     "是" if att_done else "", 
                     str(att_date) if att_done else "", 
@@ -109,9 +119,8 @@ if page == "📝 新增個案紀錄":
                     rel_time if rel_done else ""
                 ])
                 
-                # 加個分隔線讓視覺清楚一點 (最後一次不用加)
-                if i < 8:
-                    st.divider()
+                # 視覺分隔線
+                st.markdown("<hr style='margin: 5px 0; border-top: 1px dashed #444;'>", unsafe_allow_html=True)
 
         st.subheader("4. 後測資訊")
         p1, p2, p3 = st.columns(3)
@@ -140,7 +149,7 @@ if page == "📝 新增個案紀錄":
                             mmse, "是" if qol_check else "否", "是" if cpt3_check else "否"
                         ]
                         
-                        # 2. 加入交錯的訓練資料 (48個欄位)
+                        # 2. 加入交錯的訓練資料 (包含時間)
                         row.extend(training_data_list)
                         
                         # 3. 加入後測資料
@@ -177,7 +186,7 @@ elif page == "🔍 查詢與修改紀錄":
 
         st.info(f"顯示 {len(filtered_df)} 筆")
 
-        # 設定欄位顯示屬性
+        # 這裡的 data_editor 會自動抓取您 Google Sheet 的所有欄位 (包含新的時間欄位)
         edited_df = st.data_editor(
             filtered_df,
             num_rows="fixed", 
@@ -190,15 +199,12 @@ elif page == "🔍 查詢與修改紀錄":
                     options=["實驗組", "控制組"],
                     required=True,
                 )
-                # 您可以根據需要為時間欄位加入 config，例如：
-                # "T1_注意_時間": st.column_config.TextColumn("T1注意時間", help="輸入時間或長度")
             }
         )
 
         if st.button("💾 確認修改並更新至資料庫", type="primary"):
             try:
                 sheet = connect_to_gsheet()
-                # 更新邏輯：使用 Index 覆蓋
                 all_data_df.loc[edited_df.index] = edited_df
                 
                 headers = sheet.row_values(1)
